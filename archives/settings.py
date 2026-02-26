@@ -29,9 +29,78 @@ DEBUG = True
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "media.cema.africa"]
 
 
+
+# Django security settings
+SECURE_BROWSER_XSS_FILTER = True
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+# Enable CSRF protection
+CSRF_COOKIE_SECURE = True  
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+
+# ALLOWED_SERVER_ORIGINS = [
+#     o.strip() for o in os.environ.get("ALLOWED_SERVER_ORIGINS", "").split(",") if o.strip()
+# ]
+
 ALLOWED_SERVER_ORIGINS = [
-    o.strip() for o in os.environ.get("ALLOWED_SERVER_ORIGINS", "").split(",") if o.strip()
+    'http://localhost:3000', 
+    "media.cema.africa",
+    "www.media.cema.africa",
 ]
+
+
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:3000', 
+    "https://media.cema.africa",
+    "https://www.media.cema.africa", 
+]
+
+CORS_ALLOWED_ORIGINS = [
+    "https://media.cema.africa",
+    "https://www.media.cema.africa",
+    "http://localhost:3000",
+    
+]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CSRF_COOKIE_SECURE = False  
+SRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = 'Lax'
+
+#  user sessions
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+SESSION_COOKIE_AGE = 3600  
+
+# ROOT_URLCONF = ".urls"
+
+GZIP_MIN_LENGTH = 256
+
 
 
 
@@ -46,11 +115,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     
     'rest_framework',
+     'corsheaders',
     
     'config',
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
