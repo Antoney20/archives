@@ -10,8 +10,6 @@ from .utils import resolve_category, get_file_extension
 
 
 
-def _master_auth(request) -> bool:
-    return request.headers.get("X-Master-Key") == settings.STORAGE_MASTER_KEY
 
 
 def _app_auth(request):

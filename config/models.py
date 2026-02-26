@@ -1,20 +1,37 @@
 from django.db import models
 import secrets
+import string
+
+def generate_secure_token(length=20):
+    alphabet = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
 class StorageApp(models.Model):
     name = models.CharField(max_length=100, unique=True)
-    token = models.CharField(max_length=128, unique=True, blank=True)
+    token = models.CharField(max_length=20, unique=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
-    def generate_token(self):
-        self.token = secrets.token_urlsafe(48)
-        self.save()
+    def save(self, *args, **kwargs):
+        # Auto-generate token only if not set
+        if not self.token:
+            self.token = generate_secure_token(20)
+
+            # Ensure uniqueness
+            while StorageApp.objects.filter(token=self.token).exists():
+                self.token = generate_secure_token(20)
+
+        super().save(*args, **kwargs)
+
+    def regenerate_token(self):
+        self.token = generate_secure_token(20)
+        while StorageApp.objects.filter(token=self.token).exists():
+            self.token = generate_secure_token(20)
+        self.save(update_fields=["token"])
 
     def __str__(self):
         return f"{self.name} ({'active' if self.is_active else 'inactive'})"
-
 
 class StoredFile(models.Model):
     """Tracks uploaded files for management, deletion, and auditing."""
