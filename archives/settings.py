@@ -128,7 +128,7 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 
-MEDIA_ROOT = "/home/cema/media/"
+MEDIA_ROOT = "/home/sait/archives/media/"
 MEDIA_URL = "https://media.cema.africa/media/"
 
 

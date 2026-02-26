@@ -14,7 +14,6 @@ class StorageApp(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def save(self, *args, **kwargs):
-        # Auto-generate token only if not set
         if not self.token:
             self.token = generate_secure_token(20)
 
