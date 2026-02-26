@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -25,7 +26,13 @@ SECRET_KEY = 'django-insecure-u+(ko(kk*&mfze!#m)fpw80h0py=prh)k22_&kftviqdjja-*j
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "media.cema.africa"]
+
+
+ALLOWED_SERVER_ORIGINS = [
+    o.strip() for o in os.environ.get("ALLOWED_SERVER_ORIGINS", "").split(",") if o.strip()
+]
+
 
 
 # Application definition
@@ -37,6 +44,10 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
+    'rest_framework',
+    
+    'config',
 ]
 
 MIDDLEWARE = [
@@ -115,3 +126,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+
+MEDIA_ROOT = "/home/cema/media/"
+MEDIA_URL = "https://media.cema.africa/media/"
+
+
+STORAGE_MASTER_KEY = os.environ.get("STORAGE_MASTER_KEY")
