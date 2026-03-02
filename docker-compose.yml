@@ -1,0 +1,16 @@
+version: "3.9"
+
+services:
+  archives:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: archives_service
+    ports:
+      - "8001:8000"
+    environment:
+      - DJANGO_SETTINGS_MODULE=archives.settings
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./media:/app/media
+      - ./db.sqlite3:/app/db.sqlite3
