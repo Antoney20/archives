@@ -46,9 +46,13 @@ CSRF_COOKIE_SAMESITE = 'Lax'
 # ]
 
 ALLOWED_SERVER_ORIGINS = [
-    'http://localhost:3000', 
-    "media.cema.africa",
-    "www.media.cema.africa",
+    "http://localhost:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://127.0.0.1",
+    "https://media.cema.africa",
+    "https://www.media.cema.africa",
+    "https://raci.cema.africa",      
 ]
 
 
@@ -65,14 +69,8 @@ CORS_ALLOWED_ORIGINS = [
     
 ]
 
-CORS_ALLOW_METHODS = [
-    'DELETE',
-    'GET',
-    'OPTIONS',
-    'PATCH',
-    'POST',
-    'PUT',
-]
+CORS_ALLOW_METHODS = ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"]
+
 CORS_ALLOW_HEADERS = [
     'accept',
     'accept-encoding',
@@ -83,6 +81,8 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    "x-app-name",
+    "x-app-token",
 ]
 
 CSRF_COOKIE_SECURE = False  
@@ -122,6 +122,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
+    'core.middleware.origin_guard.OriginGuardMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -199,8 +200,27 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 
-MEDIA_ROOT = "/home/sait/archives/media/"
-MEDIA_URL = "https://media.cema.africa/media/"
+# MEDIA_ROOT = "/home/sait/archives/media/"
+# MEDIA_URL = "https://media.cema.africa/media/"
+
+
+if DEBUG:
+    MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+    MEDIA_URL = "/media/" 
+else:
+    MEDIA_ROOT = "/home/sait/archives/media/"
+    MEDIA_URL = "https://media.cema.africa/media/"
+
+
+
+# if DEBUG:
+#     MEDIA_ROOT = os.path.join(BASE_DIR, "media")
+# else:
+#     # For production
+#     MEDIA_ROOT = "/home/sait/archives/media/"
+
+# MEDIA_URL = "/media/"
+
 
 
 STORAGE_MASTER_KEY = os.environ.get("STORAGE_MASTER_KEY")

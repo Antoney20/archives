@@ -1,3 +1,8 @@
+import os
+import re
+from datetime import datetime
+
+
 CATEGORY_MIME_MAP = {
     "images": {
         "image/jpeg", "image/png", "image/gif", "image/webp",
@@ -29,3 +34,21 @@ def resolve_category(mime_type: str) -> str:
 def get_file_extension(filename: str) -> str:
     parts = filename.rsplit(".", 1)
     return parts[-1].lower() if len(parts) == 2 else "bin"
+
+
+def normalize_filename(name: str) -> str:
+    name = os.path.splitext(name)[0].lower()
+    name = re.sub(r"[^a-z0-9]+", "", name)
+    return name[:10] or "file"
+
+
+def generate_storage_name(original_name, record_id, ext):
+    """
+    filename format:
+    name-YYYYMM-id.ext
+    """
+
+    base = normalize_filename(original_name)
+    date_part = datetime.now().strftime("%Y%m")
+
+    return f"{base}-{date_part}-{record_id}.{ext}"

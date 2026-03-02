@@ -1,5 +1,7 @@
 import os
 import uuid
+import re
+from datetime import datetime
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -8,8 +10,8 @@ from rest_framework.decorators import api_view
 from .models import StorageApp, StoredFile
 from .utils import resolve_category, get_file_extension
 
-
-
+from .exceptions import *
+from .responses import error_response
 
 
 def _app_auth(request):
@@ -26,15 +28,23 @@ def _app_auth(request):
 
 def _allowed_origin(request) -> bool:
     origin = request.headers.get("Origin")
+    # No Origin header = server-to-server request, always allow
     return not origin or origin in settings.ALLOWED_SERVER_ORIGINS
 
 
-def _file_url(relative_path: str, request=None) -> str:
-    """Build an absolute public URL for a stored file."""
+def _file_url(relative_path: str) -> str:
+    """
+    Build an absolute public URL for a stored file.
+    MEDIA_URL must be set to the full public base in production,
+    e.g. https://media.cema.africa/media/
+    """
     base = settings.MEDIA_URL.rstrip("/")
     return f"{base}/{relative_path}"
 
 
+# ------------------------------------------------------------------
+# Admin endpoints (superuser only)
+# ------------------------------------------------------------------
 
 @api_view(["POST"])
 def register_app(request):
@@ -48,8 +58,8 @@ def register_app(request):
     if StorageApp.objects.filter(name=name).exists():
         return JsonResponse({"error": "App already exists"}, status=409)
 
+    # .save() auto-generates the token, so no extra call needed
     app = StorageApp.objects.create(name=name)
-    app.generate_token()
 
     return JsonResponse({"app": app.name, "token": app.token}, status=201)
 
@@ -65,7 +75,8 @@ def revoke_token(request):
     except StorageApp.DoesNotExist:
         return JsonResponse({"error": "App not found"}, status=404)
 
-    app.generate_token()
+    # FIX: was incorrectly calling app.generate_token() — method is regenerate_token()
+    app.regenerate_token()
     return JsonResponse({"app": app.name, "token": app.token})
 
 
@@ -86,102 +97,196 @@ def toggle_app(request):
     return JsonResponse({"app": app.name, "is_active": app.is_active})
 
 
-
 @api_view(["POST"])
 def upload_file(request):
-    if not _allowed_origin(request):
-        return JsonResponse({"error": "Origin not allowed"}, status=403)
+    try:
+        # ---------------------------
+        # Origin validation
+        # ---------------------------
+        if not _allowed_origin(request):
+            raise OriginNotAllowed("Origin not allowed")
 
-    app = _app_auth(request)
-    if app is None:
-        return JsonResponse({"error": "Invalid or missing credentials"}, status=403)
+        # ---------------------------
+        # App authentication
+        # ---------------------------
+        app = _app_auth(request)
+        if app is None:
+            raise AuthenticationFailed("Invalid credentials")
 
-    file_obj = request.FILES.get("file")
-    if not file_obj:
-        return JsonResponse({"error": "No file provided"}, status=400)
+        # ---------------------------
+        # File validation
+        # ---------------------------
+        file_obj = request.FILES.get("file")
+        if not file_obj:
+            raise FileMissing("No file provided")
 
-    mime_type = file_obj.content_type or ""
-    category = resolve_category(mime_type)
-    ext = get_file_extension(file_obj.name)
+        mime_type = file_obj.content_type or ""
+        category = resolve_category(mime_type)
+        ext = get_file_extension(file_obj.name)
 
-    stored_name = f"{uuid.uuid4().hex}.{ext}"
-    relative_path = f"{app.name}/{category}/{stored_name}"
-    abs_dir = os.path.join(settings.MEDIA_ROOT, app.name, category)
-    abs_path = os.path.join(abs_dir, stored_name)
+        # ---------------------------
+        # Sanitize app name
+        # ---------------------------
+        safe_app = re.sub(r"[^a-z0-9_-]", "", app.name.lower())
 
-    os.makedirs(abs_dir, exist_ok=True)
+        # normalize filename (avoid traversal)
+        base_name = re.sub(
+            r"[^a-z0-9]+",
+            "",
+            os.path.splitext(file_obj.name)[0].lower()
+        )[:12] or "file"
 
-    with open(abs_path, "wb+") as dest:
-        for chunk in file_obj.chunks():
-            dest.write(chunk)
+        # YYYYMM like cloud providers
+        date_part = datetime.utcnow().strftime("%Y%m")
 
-    record = StoredFile.objects.create(
-        app=app,
-        original_name=file_obj.name,
-        stored_name=stored_name,
-        category=category,
-        mime_type=mime_type,
-        size_bytes=file_obj.size,
-        relative_path=relative_path,
-    )
+        # ---------------------------
+        # Create DB record first (get ID)
+        # ---------------------------
+        record = StoredFile.objects.create(
+            app=app,
+            original_name=file_obj.name,
+            stored_name="",
+            category=category,
+            mime_type=mime_type,
+            size_bytes=file_obj.size,
+            relative_path="",
+        )
 
-    return JsonResponse({
-        "id": record.id,
-        "url": _file_url(relative_path),
-        "category": category,
-        "mime_type": mime_type,
-        "size_bytes": file_obj.size,
-        "original_name": file_obj.name,
-    }, status=201)
+        # deterministic filename
+        stored_name = f"{base_name}-{date_part}-{record.id}.{ext}"
 
+        relative_path = f"{safe_app}/{category}/{stored_name}"
+        abs_path = os.path.join(settings.MEDIA_ROOT, relative_path)
+
+        # ---------------------------
+        # Ensure directory exists
+        # ---------------------------
+        os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+
+        # ---------------------------
+        # Save file (streamed)
+        # ---------------------------
+        with open(abs_path, "wb+") as dest:
+            for chunk in file_obj.chunks():
+                dest.write(chunk)
+
+        # ---------------------------
+        # Update record
+        # ---------------------------
+        record.stored_name = stored_name
+        record.relative_path = relative_path
+        record.save(update_fields=["stored_name", "relative_path"])
+
+        return JsonResponse(
+            {
+                "id": record.id,
+                "url": _file_url(relative_path),
+                "category": category,
+                "mime_type": mime_type,
+                "size_bytes": file_obj.size,
+                "original_name": file_obj.name,
+            },
+            status=201,
+        )
+
+    except OriginNotAllowed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except AuthenticationFailed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except FileMissing as e:
+        return JsonResponse({"error": str(e)}, status=400)
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": "Upload failed", "detail": str(e)},
+            status=500,
+        )
 
 
 @api_view(["DELETE"])
 def delete_file(request, file_id):
-    if not _allowed_origin(request):
-        return JsonResponse({"error": "Origin not allowed"}, status=403)
-
-    app = _app_auth(request)
-    if app is None:
-        return JsonResponse({"error": "Invalid or missing credentials"}, status=403)
-
     try:
-        record = StoredFile.objects.get(id=file_id, app=app, is_deleted=False)
-    except StoredFile.DoesNotExist:
-        return JsonResponse({"error": "File not found"}, status=404)
+        if not _allowed_origin(request):
+            raise OriginNotAllowed("Origin not allowed")
 
-    abs_path = os.path.join(settings.MEDIA_ROOT, record.relative_path)
-    if os.path.exists(abs_path):
-        os.remove(abs_path)
+        app = _app_auth(request)
+        if app is None:
+            raise AuthenticationFailed("Invalid credentials")
 
-    record.is_deleted = True
-    record.save(update_fields=["is_deleted"])
+        try:
+            record = StoredFile.objects.get(
+                id=file_id,
+                app=app,
+                is_deleted=False,
+            )
+        except StoredFile.DoesNotExist:
+            return JsonResponse({"error": "File not found"}, status=404)
 
-    return JsonResponse({"deleted": True, "id": file_id})
+        abs_path = os.path.join(settings.MEDIA_ROOT, record.relative_path)
 
+        # remove physical file if exists
+        if os.path.exists(abs_path):
+            os.remove(abs_path)
+
+        record.is_deleted = True
+        record.save(update_fields=["is_deleted"])
+
+        return JsonResponse({"deleted": True, "id": file_id})
+
+    except OriginNotAllowed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except AuthenticationFailed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": "Delete failed", "detail": str(e)},
+            status=500,
+        )
 
 @api_view(["GET"])
 def list_files(request):
-    app = _app_auth(request)
-    if app is None:
-        return JsonResponse({"error": "Invalid or missing credentials"}, status=403)
+    try:
+        if not _allowed_origin(request):
+            raise OriginNotAllowed("Origin not allowed")
 
-    category = request.GET.get("category")  
-    qs = StoredFile.objects.filter(app=app, is_deleted=False)
-    if category:
-        qs = qs.filter(category=category)
+        app = _app_auth(request)
+        if app is None:
+            raise AuthenticationFailed("Invalid credentials")
 
-    files = [
-        {
-            "id": f.id,
-            "url": _file_url(f.relative_path),
-            "original_name": f.original_name,
-            "category": f.category,
-            "mime_type": f.mime_type,
-            "size_bytes": f.size_bytes,
-            "uploaded_at": f.uploaded_at.isoformat(),
-        }
-        for f in qs
-    ]
+        files = (
+            StoredFile.objects
+            .filter(app=app, is_deleted=False)
+            .order_by("-created_at")
+        )
 
-    return JsonResponse({"count": len(files), "files": files})
+        data = [
+            {
+                "id": f.id,
+                "url": _file_url(f.relative_path),
+                "category": f.category,
+                "mime_type": f.mime_type,
+                "size_bytes": f.size_bytes,
+                "original_name": f.original_name,
+                "created_at": f.created_at,
+            }
+            for f in files
+        ]
+
+        return JsonResponse({"count": len(data), "results": data})
+
+    except OriginNotAllowed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except AuthenticationFailed as e:
+        return JsonResponse({"error": str(e)}, status=403)
+
+    except Exception as e:
+        return JsonResponse(
+            {"error": "Listing failed", "detail": str(e)},
+            status=500,
+        )
+
